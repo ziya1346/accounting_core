@@ -1,1 +1,9 @@
-hesabdari.db 
+**pycache**/
+*.pyc
+build/
+dist/
+.vscode/
+.idea/
+*.log
+*.db-journal
+hesabdari.db
