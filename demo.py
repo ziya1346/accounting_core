@@ -7,7 +7,7 @@ from decimal import Decimal
 from datetime import date
 
 from domain.entities import Account, AccountType, JournalEntry, JournalLine
-from application.services import ChartOfAccountsService, JournalService, TrialBalanceService, ClosingService
+from application.currency_conversion.services import ChartOfAccountsService, JournalService, TrialBalanceService, ClosingService
 from infrastructure.repositories import SchemaBuilder, SqliteAccountRepository, SqliteJournalRepository, SqliteAuditLog
 
 DB = "/tmp/accounting_demo.db"

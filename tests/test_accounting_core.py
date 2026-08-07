@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from domain.entities import (
     Account, AccountType, JournalEntry, JournalLine, DomainError, JournalEntryStatus
 )
-from application.services import (
+from application.currency_conversion.services import (
     ChartOfAccountsService, JournalService, TrialBalanceService, ClosingService
 )
 from infrastructure.repositories import (

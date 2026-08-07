@@ -15,7 +15,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(sys.argv[0] if not getattr(sys, "froz
 sys.path.insert(0, BASE_DIR)
 
 from domain.entities import Account, AccountType, JournalEntry, JournalLine, DomainError
-from application.services import ChartOfAccountsService, JournalService, TrialBalanceService, ClosingService
+from application.currency_conversion.services import ChartOfAccountsService, JournalService, TrialBalanceService, ClosingService
 from infrastructure.repositories import (
     SchemaBuilder, SqliteAccountRepository, SqliteJournalRepository, SqliteAuditLog
 )
