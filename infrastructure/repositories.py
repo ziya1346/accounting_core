@@ -1,12 +1,10 @@
 """
 Infrastructure Layer — لایه زیرساخت
-پیاده‌سازی مخزن‌ها (Repositories) روی SQLite (برای نسخه تک‌کاربره طبق پرامپت).
-برای نسخه سازمانی/سرور، همین اینترفیس‌ها روی PostgreSQL + SQLAlchemy پیاده می‌شوند
-بدون نیاز به تغییر در Domain یا Application (اصل وارونگی وابستگی - DIP).
+پیاده‌سازی مخزن‌ها (Repositories) روی SQLite
+پشتیبانی از Multi-Currency اضافه شده است.
 """
 from __future__ import annotations
 import sqlite3
-import json
 from decimal import Decimal
 from datetime import date, datetime
 from typing import Optional
@@ -15,6 +13,7 @@ from domain.entities import (
     Account, AccountType, JournalEntry, JournalLine,
     JournalEntryStatus, JournalEntryType
 )
+from domain.value_objects.currency import Currency
 
 
 def _connect(db_path: str) -> sqlite3.Connection:
@@ -56,6 +55,9 @@ class SchemaBuilder:
             account_code TEXT NOT NULL,
             debit TEXT NOT NULL,
             credit TEXT NOT NULL,
+            currency TEXT NOT NULL DEFAULT 'IRR',
+            exchange_rate TEXT,
+            amount_in_base TEXT,
             description TEXT,
             cost_center TEXT,
             project_code TEXT,
@@ -135,16 +137,33 @@ class SqliteJournalRepository:
              entry.description, entry.fiscal_year, entry.branch_code, entry.company_code,
              entry.status.value),
         )
-        # only insert lines the first time (avoid dupes on status-update saves)
-        existing = conn.execute("SELECT COUNT(*) FROM journal_lines WHERE entry_id=?", (entry.id,)).fetchone()[0]
+
+        existing = conn.execute(
+            "SELECT COUNT(*) FROM journal_lines WHERE entry_id=?", (entry.id,)
+        ).fetchone()[0]
+
         if existing == 0:
             for line in entry.lines:
                 conn.execute(
-                    "INSERT INTO journal_lines (entry_id, account_code, debit, credit, description, "
-                    "cost_center, project_code) VALUES (?,?,?,?,?,?,?)",
-                    (entry.id, line.account_code, str(line.debit), str(line.credit),
-                     line.description, line.cost_center, line.project_code),
+                    """
+                    INSERT INTO journal_lines 
+                    (entry_id, account_code, debit, credit, currency, exchange_rate, amount_in_base, description, cost_center, project_code) 
+                    VALUES (?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        entry.id,
+                        line.account_code,
+                        str(line.debit),
+                        str(line.credit),
+                        line.currency.value if hasattr(line.currency, "value") else str(line.currency),
+                        str(line.exchange_rate) if line.exchange_rate is not None else None,
+                        str(line.amount_in_base) if line.amount_in_base is not None else None,
+                        line.description,
+                        line.cost_center,
+                        line.project_code,
+                    ),
                 )
+
         conn.commit()
         conn.close()
 
@@ -175,8 +194,15 @@ class SqliteJournalRepository:
     def _row_to_entry(row, lines_rows) -> JournalEntry:
         lines = [
             JournalLine(
-                account_code=lr[2], debit=Decimal(lr[3]), credit=Decimal(lr[4]),
-                description=lr[5] or "", cost_center=lr[6], project_code=lr[7],
+                account_code=lr[2],
+                debit=Decimal(lr[3]),
+                credit=Decimal(lr[4]),
+                currency=Currency(lr[5]) if lr[5] else Currency.IRR,
+                exchange_rate=Decimal(lr[6]) if lr[6] else None,
+                amount_in_base=Decimal(lr[7]) if lr[7] else None,
+                description=lr[8] or "",
+                cost_center=lr[9],
+                project_code=lr[10],
             ) for lr in lines_rows
         ]
         return JournalEntry(
@@ -191,8 +217,6 @@ class SqliteJournalRepository:
 
 
 class SqliteAuditLog:
-    """پیاده‌سازی Audit Trail — ثبت غیرقابل‌تغییر تمام عملیات کاربران طبق استاندارد حسابرسی"""
-
     def __init__(self, db_path: str):
         self.db_path = db_path
 

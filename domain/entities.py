@@ -2,6 +2,7 @@
 Domain Layer — لایه دامنه
 هیچ وابستگی به فریم‌ورک، دیتابیس یا رابط کاربری ندارد (طبق Clean Architecture / DDD).
 قوانین کسب‌وکار حسابداری اینجا نگهداری می‌شوند: سیستم دوبل، اصل تعهدی، کدینگ شناور.
+پشتیبانی از Multi-Currency اضافه شده است.
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
@@ -11,23 +12,23 @@ from datetime import date
 from typing import Optional
 import uuid
 
+from domain.value_objects.currency import Currency
+
 
 class AccountNature(str, Enum):
-    """ماهیت حساب: بدهکار یا بستانکار"""
-    DEBIT = "DEBIT"      # دارایی، هزینه
-    CREDIT = "CREDIT"    # بدهی، حقوق صاحبان سهام، درآمد
+    DEBIT = "DEBIT"
+    CREDIT = "CREDIT"
 
 
 class AccountType(str, Enum):
-    ASSET = "ASSET"                 # دارایی
-    LIABILITY = "LIABILITY"         # بدهی
-    EQUITY = "EQUITY"               # حقوق صاحبان سهام
-    REVENUE = "REVENUE"             # درآمد
-    EXPENSE = "EXPENSE"             # هزینه
+    ASSET = "ASSET"
+    LIABILITY = "LIABILITY"
+    EQUITY = "EQUITY"
+    REVENUE = "REVENUE"
+    EXPENSE = "EXPENSE"
 
 
 class DomainError(Exception):
-    """خطای نقض قانون کسب‌وکار (نه خطای فنی)"""
     pass
 
 
@@ -37,15 +38,11 @@ def two_decimals(value) -> Decimal:
 
 @dataclass
 class Account:
-    """
-    حساب در دفتر کل — از کدینگ شناور پشتیبانی می‌کند:
-    مثال: 1-101-01-001  (گروه-کل-معین-تفصیلی)
-    """
     code: str
     name: str
     account_type: AccountType
     parent_code: Optional[str] = None
-    is_postable: bool = True   # آیا سند مستقیم روی این حساب زده می‌شود یا فقط والد یک زیرمجموعه است
+    is_postable: bool = True
     currency: str = "IRR"
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
@@ -57,7 +54,6 @@ class Account:
 
     @property
     def level(self) -> int:
-        """سطح در کدینگ شناور بر اساس تعداد بخش‌های کد"""
         return len(self.code.split("-"))
 
     def validate(self):
@@ -69,13 +65,15 @@ class Account:
 
 @dataclass
 class JournalLine:
-    """یک ردیف (آرتیکل) از سند حسابداری"""
     account_code: str
     debit: Decimal = Decimal("0.00")
     credit: Decimal = Decimal("0.00")
+    currency: Currency = Currency.IRR
+    exchange_rate: Optional[Decimal] = None
+    amount_in_base: Optional[Decimal] = None
     description: str = ""
-    cost_center: Optional[str] = None   # مرکز هزینه
-    project_code: Optional[str] = None  # پروژه
+    cost_center: Optional[str] = None
+    project_code: Optional[str] = None
 
     def __post_init__(self):
         self.debit = two_decimals(self.debit)
@@ -89,26 +87,23 @@ class JournalLine:
 
 
 class JournalEntryStatus(str, Enum):
-    DRAFT = "DRAFT"           # پیش‌نویس
-    POSTED = "POSTED"         # ثبت‌شده در دفاتر
-    REVERSED = "REVERSED"     # برگشت‌خورده
+    DRAFT = "DRAFT"
+    POSTED = "POSTED"
+    REVERSED = "REVERSED"
 
 
 class JournalEntryType(str, Enum):
-    NORMAL = "NORMAL"           # سند عادی
-    OPENING = "OPENING"         # سند افتتاحیه
-    CLOSING = "CLOSING"         # سند اختتامیه
-    ADJUSTMENT = "ADJUSTMENT"   # سند تعدیلات
+    NORMAL = "NORMAL"
+    OPENING = "OPENING"
+    CLOSING = "CLOSING"
+    ADJUSTMENT = "ADJUSTMENT"
 
 
 @dataclass
 class JournalEntry:
-    """
-    سند حسابداری — قلب سیستم دوبل.
-    قانون طلایی: مجموع بدهکار = مجموع بستانکار (در تراز باشد)
-    """
     entry_date: date
     lines: list[JournalLine] = field(default_factory=list)
+    base_currency: Currency = Currency.IRR
     entry_type: JournalEntryType = JournalEntryType.NORMAL
     description: str = ""
     fiscal_year: Optional[str] = None
@@ -127,29 +122,45 @@ class JournalEntry:
         return sum((l.credit for l in self.lines), Decimal("0.00"))
 
     @property
+    def total_debit_in_base(self) -> Decimal:
+        total = Decimal("0.00")
+        for line in self.lines:
+            if line.debit > 0:
+                amount = line.amount_in_base if line.amount_in_base is not None else line.debit
+                total += amount
+        return two_decimals(total)
+
+    @property
+    def total_credit_in_base(self) -> Decimal:
+        total = Decimal("0.00")
+        for line in self.lines:
+            if line.credit > 0:
+                amount = line.amount_in_base if line.amount_in_base is not None else line.credit
+                total += amount
+        return two_decimals(total)
+
+    @property
     def is_balanced(self) -> bool:
-        return self.total_debit == self.total_credit
+        return self.total_debit_in_base == self.total_credit_in_base
 
     def validate(self):
-        """اصل تعهدی و سیستم دوبل: بدون تراز بودن، سند نامعتبر است"""
         if len(self.lines) < 2:
             raise DomainError("سند حسابداری باید حداقل دو ردیف داشته باشد (اصل دوبل)")
-        if self.total_debit == 0:
+        if self.total_debit_in_base == 0:
             raise DomainError("مجموع سند نمی‌تواند صفر باشد")
         if not self.is_balanced:
             raise DomainError(
-                f"سند در تراز نیست: بدهکار={self.total_debit} بستانکار={self.total_credit}"
+                f"سند در تراز نیست (ارز پایه: {self.base_currency.value}) | "
+                f"بدهکار={self.total_debit_in_base} | بستانکار={self.total_credit_in_base}"
             )
 
     def post(self):
-        """ثبت قطعی سند در دفاتر — فقط پس از اعتبارسنجی کامل"""
         self.validate()
         if self.status != JournalEntryStatus.DRAFT:
             raise DomainError("فقط سند پیش‌نویس قابل ثبت است")
         self.status = JournalEntryStatus.POSTED
 
     def reverse(self) -> "JournalEntry":
-        """سند برگشتی (Reversal) — برای اصلاح بدون حذف سند اصلی، طبق استاندارد حسابرسی"""
         if self.status != JournalEntryStatus.POSTED:
             raise DomainError("فقط سند ثبت‌شده قابل برگشت است")
         reversed_lines = [
@@ -157,6 +168,9 @@ class JournalEntry:
                 account_code=l.account_code,
                 debit=l.credit,
                 credit=l.debit,
+                currency=l.currency,
+                exchange_rate=l.exchange_rate,
+                amount_in_base=l.amount_in_base,
                 description=f"برگشت: {l.description}",
                 cost_center=l.cost_center,
                 project_code=l.project_code,
@@ -167,6 +181,7 @@ class JournalEntry:
         return JournalEntry(
             entry_date=self.entry_date,
             lines=reversed_lines,
+            base_currency=self.base_currency,
             entry_type=self.entry_type,
             description=f"سند برگشتی سند شماره {self.number}",
             fiscal_year=self.fiscal_year,

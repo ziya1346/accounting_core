@@ -20,14 +20,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from domain.entities import (
     Account, AccountType, JournalEntry, JournalLine, DomainError, JournalEntryStatus
 )
-from application.currency_conversion.services import (
+from application.services import (
     ChartOfAccountsService, JournalService, TrialBalanceService, ClosingService
 )
 from infrastructure.repositories import (
     SchemaBuilder, SqliteAccountRepository, SqliteJournalRepository, SqliteAuditLog
 )
 
-TEST_DB = "/tmp/accounting_backtest.db"
+TEST_DB = "accounting_backtest.db"
 
 
 class BaseTestCase(unittest.TestCase):
